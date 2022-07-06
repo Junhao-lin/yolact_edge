@@ -32,7 +32,7 @@ import cv2
 import logging
 
 import math
-
+dir = '/workspace/yolact_edge/data/labelimg/'
 
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -60,7 +60,7 @@ def parse_args(argv=None):
                         help='Whether or not to display bboxes around masks')
     parser.add_argument('--display_text', default=True, type=str2bool,
                         help='Whether or not to display text (class [score])')
-    parser.add_argument('--display_scores', default=True, type=str2bool,
+    parser.add_argument('--display_scores', default=True , type=str2bool,
                         help='Whether or not to display scores in addition to classes')
     parser.add_argument('--display', dest='display', action='store_true',
                         help='Display qualitative results instead of quantitative ones.')
@@ -208,11 +208,11 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
     # I wish I had access to OpenGL or Vulkan but alas, I guess Pytorch tensor operations will have to suffice
     if args.display_masks and cfg.eval_mask_branch:
         # After this, mask is of size [num_dets, h, w, 1]
-        masks = masks[:num_dets_to_consider, :, :, None]
-        
+        masks = masks[:num_dets_to_consider, :, :, None]        
+
         # Prepare the RGB images for each mask given their color (size [num_dets, h, w, 1])
         colors = torch.cat([get_color(j, on_gpu=img_gpu.device.index).view(1, 1, 1, 3) for j in range(num_dets_to_consider)], dim=0)
-        masks_color = masks.repeat(1, 1, 1, 3) * colors * mask_alpha
+        masks_color = masks.repeat(1, 1, 1, 3) * colors * mask_alpha      
 
         # This is 1 everywhere except for 1-mask_alpha where the mask is
         inv_alph_masks = masks * (-mask_alpha) + 1
@@ -226,18 +226,35 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
             masks_color_cumul = masks_color[1:] * inv_alph_cumul
             masks_color_summand += masks_color_cumul.sum(dim=0)
 
-        img_gpu = img_gpu * inv_alph_masks.prod(dim=0) + masks_color_summand
-        
+        #----------------------------------------LIN add start--------------------------------------------------------------------------
+        # 用 canny 強化 mask 邊框
+        mask_gray = cv2.cvtColor((masks_color_summand * 255).byte().cpu().numpy(), cv2.COLOR_BGR2GRAY)
+        canny = cv2.Canny(mask_gray, 30, 150)   
+        mask_Edge = cv2.cvtColor(canny,cv2.COLOR_GRAY2RGB)        
+
+        # 對整張圖片取 canny,並乘上 mask ,只留下 mask 區域的線段        
+        total_gray = cv2.cvtColor((img_gpu * 255).byte().cpu().numpy(), cv2.COLOR_BGR2GRAY)  # 整張圖片取灰階
+        blur_gray = cv2.GaussianBlur(total_gray,(5, 5), 0)
+        total_canny = cv2.Canny(blur_gray, 100, 165) # 整張圖片取邊
+        total_canny = total_canny *  mask_gray
+        total_canny_rgb = cv2.cvtColor(total_canny,cv2.COLOR_GRAY2RGB)
+
+        img_gpu = img_gpu * inv_alph_masks.prod(dim=0) + masks_color_summand 
+        img_numpy = (img_gpu * 255).byte().cpu().numpy() * ((255-mask_Edge)/255) * ((255-total_canny_rgb)/255) # 將 mask 邊框跟內部強化的線段一起顯示
+        #----------------------------------------LIN add end --------------------------------------------------------------------------
+
     # Then draw the stuff that needs to be done on the cpu
-    # Note, make sure this is a uint8 tensor or opencv will not anti alias text for whatever reason
-    img_numpy = (img_gpu * 255).byte().cpu().numpy()
+    # Note, make sure this is a uint8 tensor or opencv will not anti alias text for whatever reason    
+    # img_numpy =   (img_gpu * 255).byte().cpu().numpy() * ((255-Edge)/255) + Edge * [0,0,255] 
+    img_numpy =img_numpy.astype( np.uint8 )
+    print(type(img_numpy[0,0,0]))
     
     if args.display_text or args.display_bboxes:
         for j in reversed(range(num_dets_to_consider)):
             x1, y1, x2, y2 = boxes[j, :]
             color = get_color(j)
             score = scores[j]
-
+            
             if args.display_bboxes:
                 cv2.rectangle(img_numpy, (x1, y1), (x2, y2), color, 1)
 
@@ -895,7 +912,7 @@ def evaluate(net:Yolact, dataset, train_mode=False, train_cfg=None):
     cfg.mask_proto_debug = args.mask_proto_debug
 
     detections = None
-    if args.output_coco_json and (args.image or args.images):
+    if args.output_coco_json and (args.image or args.images): 
         detections = Detections()
         prep_coco_cats()
 
@@ -913,7 +930,7 @@ def evaluate(net:Yolact, dataset, train_mode=False, train_cfg=None):
 
     elif args.images is not None:
         inp, out = args.images.split(':')
-        evalimages(net, inp, out, detections=detections)
+        evalimages(net, inp, out, detections=detections)       
 
         if args.output_coco_json:
             detections.dump()
@@ -1043,7 +1060,7 @@ def evaluate(net:Yolact, dataset, train_mode=False, train_cfg=None):
 
                         # Perform the meat of the operation here depending on our mode.
                         if args.display:
-                            img_numpy = prep_display(preds, img, h, w)
+                            img_numpy,_ = prep_display(preds, img, h, w)
                         elif args.benchmark:
                             new_h, new_w = h, w
                             if new_w > 640:
@@ -1278,5 +1295,3 @@ if __name__ == '__main__':
             net = net.cuda()
 
         evaluate(net, dataset)
-
-

@@ -128,10 +128,6 @@ class Config(object):
         for k, v in vars(self).items():
             print(k, ' = ', v)
 
-
-
-
-
 # ----------------------- DATASETS ----------------------- #
 
 dataset_base = Config({
@@ -168,6 +164,20 @@ dataset_base = Config({
     # Joint training
     'joint': None
 })
+# -------------------------Cityscape dataset 路徑設定------------------------- # Louis add
+
+my_custom_dataset = dataset_base.copy({
+    'name': 'My Dataset',
+
+    'train_images': '/workspace/cityscapes-to-coco-conversion/data/cityspace/',
+    'train_info': '/workspace/cityscapes-to-coco-conversion/data/cityspace/annotations/instancesonly_filtered_gtFine_train.json',
+    'valid_images': '/workspace/cityscapes-to-coco-conversion/data/cityspace/',
+    'valid_info': '/workspace/cityscapes-to-coco-conversion/data/cityspace/annotations/instancesonly_filtered_gtFine_val.json',
+    'has_gt': True,
+    'class_names': ("person","car","bicycle","rider","motorcycle",'bus','train','truck'),
+    'label_map': {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8:8}
+})
+# --------------------------------------------------------------------------#
 
 coco2014_dataset = dataset_base.copy({
     'name': 'COCO 2014',
@@ -521,19 +531,22 @@ coco_base_config = Config({
     'joint_dataset': None,
     'num_classes': 81, # This should include the background class
 
-    'max_iter': 400000,
+    # 'max_iter': 400000,
+    'max_iter': 200000,     # Louis add 修改總訓練次數
 
     # The maximum number of detections for evaluation
     'max_num_detections': 100,
 
     # dw' = momentum * dw - lr * (grad + decay * w)
-    'lr': 1e-3,
+    # 'lr': 1e-3,
+    'lr': 2e-4,             # Louis add 因 Batch size 變小，所以 learning rate 調小
     'momentum': 0.9,
     'decay': 5e-4,
 
     # For each lr step, what to multiply the lr with
     'gamma': 0.1,
-    'lr_steps': (280000, 360000, 400000),
+    # 'lr_steps': (280000, 360000, 400000),
+    'lr_steps': (100000, 150000, 170000), # Louis add 理由同上隨著訓練次數做調整
 
     # Initial learning rate to linearly warmup from (if until > 0)
     'lr_warmup_init': 1e-4,
@@ -801,7 +814,10 @@ yolact_edge_config = yolact_base_config.copy({
 
 yolact_edge_mobilenetv2_config = yolact_edge_config.copy({
     'name': 'yolact_edge_mobilenetv2',
-
+    'torch2trt_max_calibration_images': 100,
+    'dataset': my_custom_dataset,   # Louis add 換成 Cityscape dataset
+    'num_classes': 9,   # Louis add Cityscape dataset 總共 9 個類別
+    'use_tensorrt_safe_mode': False, 
     'backbone': mobilenetv2_backbone
 })
 
